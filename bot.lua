@@ -45,19 +45,6 @@ local cy = require("clunkyard")
 local angles = cy.angles
 local function steer(towards, current) return angles:clamp(angles:angle_diff(towards, current) / 45) end
 
--- The calibration kernel, xorshift-sqrt v1: work rounds of a 64-bit xorshift
--- and a square-root sum. Lua's >> is a logical shift.
-local function calibration_work(work, tick)
-  local x, sum = 88172645463325252 ~ tick, 0.0
-  for _ = 1, work do
-    x = x ~ (x << 13)
-    x = x ~ (x >> 7)
-    x = x ~ (x << 17)
-    sum = sum + math.sqrt(x >> 11)
-  end
-  return (math.floor(sum) + (x >> 40)) % 1000000
-end
-
 local Starter = {}
 function Starter:on_start() self.free = self.match.is_3d and self.arena.gravity.z == 0 end
 function Starter:on_turn()
@@ -99,8 +86,5 @@ function Starter:on_turn()
     local climb = zone.shape=="sphere" and angles:elevation_to(me.position,zone.center) or 0
     self.drive:set({throttle=0.8,turn=angles:clamp(angles:angle_diff(angles:bearing_to(me.position,zone.center),me.heading)/30),pitch_turn=angles:clamp((climb-me.pitch)/30)})
   end
-  -- The arena's rate calibration, xorshift-sqrt v1; safe to delete.
-  local work = self.raw:number("state.calibration.work")
-  if work and work>0 and work%1==0 then self.status:set({text="WORK",value=calibration_work(math.tointeger(work),self.clock.tick)}) end
 end
 cy.run(Starter)
