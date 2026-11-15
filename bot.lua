@@ -7,7 +7,8 @@
 -- clock: tick seconds remaining_ticks
 -- arena: size gravity terrain_kind ground_height(x y)
 -- me: health position velocity heading pitch roll angular_velocity
---   attitude grounded altitude applied
+--   attitude grounded altitude applied hull_mounts to_mount(heading pitch)
+--   from_mount(heading pitch) mount_toward(point)
 -- battery: charge capacity regen sustainable_drive compute
 --   drive_cost(fraction)
 -- drive: hover_lift
@@ -29,7 +30,8 @@
 -- score: me best armour
 -- angles: normalize(degrees) angle_diff(target current)
 --   bearing_to(from to) elevation_to(from to) direction(heading pitch)
---   distance(a b) clamp(value low high)
+--   distance(a b) to_chassis(heading pitch attitude)
+--   from_chassis(heading pitch attitude) clamp(value low high)
 -- raw: number(path) text(path) has(path) flag(path) count(path) line()
 -- Controls: drive.set(throttle turn pitch_turn)
 --   drive.forces(thrust strafe lift yaw_torque pitch_torque roll_torque brake)
@@ -46,7 +48,10 @@ local angles = cy.angles
 local function steer(towards, current) return angles:clamp(angles:angle_diff(towards, current) / 45) end
 
 local Starter = {}
-function Starter:on_start() self.free = self.match.is_3d and self.arena.gravity.z == 0 end
+function Starter:on_start()
+  self.free = self.match.is_3d and self.arena.gravity.z == 0
+  self.dodges, self.dodge_end = 0, 0
+end
 function Starter:on_turn()
   local me, gun, scanner = self.me, self.gun, self.scanner
   self.drive:forces({brake=0.2})
@@ -55,6 +60,7 @@ function Starter:on_turn()
     local throttle = target.range > 350 and 0.7 or target.range < 200 and -0.4 or 0.2
     self.drive:set({throttle=throttle,turn=steer(target.bearing,me.heading),pitch_turn=steer(target.elevation,me.pitch)})
     scanner:set({heading=target.bearing,arc=20,pitch=target.elevation})
+    -- gun.lead is the intercept if the target holds course.
     local power = gun:power_for_flight_time(target.range,1)
     local aim = gun:lead(target,power)
     local heading,pitch = aim and aim.heading or target.bearing, aim and aim.pitch or target.elevation
@@ -74,6 +80,24 @@ function Starter:on_turn()
     self.drive:set({throttle=0.5,turn=0.33,pitch_turn=steer(0,me.pitch)})
     scanner:set({heading=angles:normalize(scanner.last.heading+36),arc=40,pitch=self.free and ((self.clock.tick//10)%3-1)*35 or 0})
     self.status:set({text="SEARCH"})
+  end
+  -- A simple dodge: vary it, or predict the shooter.
+  local tick = self.clock.tick
+  local heard = false
+  for _, c in ipairs(self.sensors.cues) do heard = heard or c.source == "muzzle" end
+  if tick >= self.dodge_end and heard then
+    self.dodges, self.dodge_end = self.dodges + 1, tick + 10
+  end
+  if tick < self.dodge_end then
+    -- Off the line of fire: left, then right next time (turn is positive left, strafe right).
+    local left = self.dodges % 2 == 1
+    if self.match.control == "forces" then
+      self.drive:set({throttle=0.5})
+      self.drive:forces({strafe=left and -1 or 1})
+    else
+      self.drive:set({throttle=1,turn=left and 1 or -1})
+    end
+    self.status:set({text=left and "dodge:left" or "dodge:right",value=self.dodges})
   end
   if self.battery.charge < self.battery.capacity/4 then self.drive:set({throttle=self.drive:get("throttle")*0.5}) end
   local storm = self.nav.storm
